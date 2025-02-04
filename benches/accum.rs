@@ -1,7 +1,8 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
 use rand::thread_rng;
 
-use split_accum::accum;
+use split_accum::common;
+use split_accum::manager;
 
 const SAMPLES: usize = 50;
 const BATCHES: &[u32] = &[10, 100, 1000];
@@ -10,12 +11,12 @@ fn bench_accum(c: &mut Criterion) {
     let mut group = c.benchmark_group("accumulator");
 
     let rng = thread_rng();
-    let config = accum::Config {
+    let config = manager::Config {
         partition_size: 1000,
         capacity: 1000_000,
     };
-    let (sk, pk) = accum::create_keys(&config, rng);
-    let accums = accum::initialize(&config, &sk);
+    let (sk, pk) = manager::create_keys(&config, rng);
+    let accums = manager::initialize(&config, &sk);
     let epoch0 = 0;
     let epoch1 = 1;
 
@@ -26,7 +27,7 @@ fn bench_accum(c: &mut Criterion) {
                     .remove_partition_members(
                         &accums[0],
                         (1..=count).map(|index| {
-                            accum::MemberHandle::compute_for_index(&config, index).unwrap()
+                            common::MemberHandle::compute_for_index(&config, index).unwrap()
                         }),
                     )
                     .expect("Error removing members");
@@ -45,7 +46,7 @@ fn bench_accum(c: &mut Criterion) {
     }
 
     let signed1 = sk.sign_partition(&accums[0], epoch0);
-    let member1 = accum::MemberHandle::compute_for_index(&config, 1).unwrap();
+    let member1 = common::MemberHandle::compute_for_index(&config, 1).unwrap();
     group.bench_function("create membership witness", |b| {
         b.iter(|| {
             let witness = sk.create_membership_witness(&signed1, member1);
@@ -56,7 +57,7 @@ fn bench_accum(c: &mut Criterion) {
     let witness = sk
         .create_membership_witness(
             &signed1,
-            accum::MemberHandle::compute_for_index(&config, 1000).unwrap(),
+            common::MemberHandle::compute_for_index(&config, 1000).unwrap(),
         )
         .unwrap();
     for count in BATCHES.iter().copied() {
@@ -64,7 +65,7 @@ fn bench_accum(c: &mut Criterion) {
             .remove_partition_members(
                 &accums[0],
                 (1..count)
-                    .map(|index| accum::MemberHandle::compute_for_index(&config, index).unwrap()),
+                    .map(|index| common::MemberHandle::compute_for_index(&config, index).unwrap()),
             )
             .expect("Error removing members");
         let signed2 = sk.sign_partition(&accum2, epoch1);
@@ -72,7 +73,7 @@ fn bench_accum(c: &mut Criterion) {
             BenchmarkId::new("apply batch removal to membership witness", count),
             |b| {
                 b.iter(|| {
-                    let mut update = witness.update();
+                    let mut update = witness.begin_update();
                     update.apply_batch_removal(&batch).unwrap();
                     black_box(update.finalize_with_signature(&pk, &signed2).unwrap());
                 })

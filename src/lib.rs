@@ -2,4 +2,5 @@
 
 #![warn(missing_docs)]
 
-pub mod accum;
+pub mod common;
+pub mod manager;
