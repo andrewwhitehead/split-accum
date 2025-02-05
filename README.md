@@ -48,6 +48,7 @@ on mobile devices, but is still expected to be reasonable.
 - 100 partitions can be signed in about 50ms.
 - A membership proof can be generated in about 7ms and verified in about 8ms. Only the
   verifier needs to perform pairing operations.
+- A membership proof is 516 bytes and the manager's public key is 288 bytes.
 
 For a concrete example (sizes are adjustable according to desired performance):
 
