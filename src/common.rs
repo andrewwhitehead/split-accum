@@ -4,11 +4,12 @@ use rand::RngCore;
 use std::{fmt, vec::Vec};
 
 use bls12_381_plus::{
-    elliptic_curve::subtle::Choice,
+    elliptic_curve::{hash2curve::ExpandMsgXmd, subtle::Choice},
     ff::Field,
     group::{Curve, Group},
     multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared, G2Projective, Scalar,
 };
+use sha2::Sha256;
 
 /// Define the configuration parameters for the accumulator.
 #[derive(Debug)]
@@ -89,7 +90,18 @@ impl SetupPublic {
     /// Verify a signature over an partition state.
     #[must_use]
     pub(crate) fn _verify_signed_partition(&self, signature: &SignedPartition) -> Choice {
-        let sig_check = multi_miller_loop(&[
+        // Combining these pairings using an additional deterministic factor (r),
+        // deterministically chosen.
+        // e(S, G2x + G2y•epoch + U) =? e(G1, G2)
+        // e(V, G2) =? e(G1, U)
+        // => e(S, G2x + G2y•epoch + U)•e(G1•r, U) =? e(G1 + V•r, G2)
+        let mut enc = Vec::with_capacity(48 + 48 + 96);
+        enc.extend_from_slice(&signature.commit.to_compressed());
+        enc.extend_from_slice(&signature.g2commit.to_compressed());
+        enc.extend_from_slice(&signature.signature.to_compressed());
+        let r = hash_to_scalar(&enc, b"pairing factor");
+
+        multi_miller_loop(&[
             (
                 &signature.signature.to_affine(),
                 &G2Prepared::from(
@@ -100,25 +112,16 @@ impl SetupPublic {
                 ),
             ),
             (
-                &-G1Affine::generator(),
-                &G2Prepared::from(G2Affine::generator()),
-            ),
-        ])
-        .final_exponentiation()
-        .is_identity();
-        let commit_check = multi_miller_loop(&[
-            (
-                &signature.commit.to_affine(),
-                &G2Prepared::from(G2Affine::generator()),
-            ),
-            (
-                &-G1Affine::generator(),
+                &(G1Affine::generator() * r).to_affine(),
                 &G2Prepared::from(signature.g2commit.to_affine()),
             ),
+            (
+                &-(G1Affine::generator() + signature.commit.to_affine() * r).to_affine(),
+                &G2Prepared::from(G2Affine::generator()),
+            ),
         ])
         .final_exponentiation()
-        .is_identity();
-        sig_check & commit_check
+        .is_identity()
     }
 
     /// Add the public key to a Fiat-Shamir transcript.
@@ -145,13 +148,14 @@ impl MemberHandle {
         index: u32,
     ) -> Result<MemberHandle, AccumulatorError> {
         if index == 0 || index > config.capacity {
-            return Err(AccumulatorError::InvalidMember);
+            Err(AccumulatorError::InvalidMember)
+        } else {
+            let partition = (index - 1) / config.partition_size;
+            Ok(MemberHandle {
+                value: Scalar::from(index),
+                partition,
+            })
         }
-        let partition = (index - 1) / config.partition_size;
-        Ok(MemberHandle {
-            value: Scalar::from(index),
-            partition,
-        })
     }
 }
 
@@ -234,7 +238,7 @@ impl UpdateMembershipWitness {
                 denoms[0] *= term;
                 denoms.push(-term);
             }
-            // This inversion should never fail as all the terms are expected to be non-zero
+            // This inversion should never fail as all the terms are checked to be non-zero
             assert!(bool::from(batch_invert(&mut denoms)), "Inversion error");
             self.inner.witness = G1Projective::sum_of_products(&points, &denoms);
             Ok(())
@@ -288,6 +292,10 @@ pub(crate) fn batch_invert(values: &mut [Scalar]) -> Choice {
         values[0] = carry;
         ret
     }
+}
+
+pub(crate) fn hash_to_scalar(input: &[u8], dst: &[u8]) -> Scalar {
+    Scalar::hash::<ExpandMsgXmd<Sha256>>(&input, dst)
 }
 
 #[cfg(test)]

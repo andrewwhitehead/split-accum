@@ -1,16 +1,15 @@
 use bls12_381_plus::{
     elliptic_curve::{
         group::{Curve, Group},
-        hash2curve::ExpandMsgXmd,
         subtle::ConstantTimeEq,
     },
     multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared, G2Projective, Scalar,
 };
 use rand::RngCore;
-use sha2::Sha256;
 
 use crate::common::{
-    nonzero_scalar, AccumulatorError, MembershipWitness, SetupPublic, SignedPartition,
+    hash_to_scalar, nonzero_scalar, AccumulatorError, MembershipWitness, SetupPublic,
+    SignedPartition,
 };
 
 #[derive(Debug, Clone)]
@@ -168,7 +167,7 @@ impl PrepareMembershipProof {
     pub fn compute_challenge(&self) -> Scalar {
         let mut ch_data = Vec::new();
         self.add_challenge_input(&mut ch_data);
-        Scalar::hash::<ExpandMsgXmd<Sha256>>(&ch_data, b"split-accum-member")
+        hash_to_scalar(&ch_data, b"split-accum-member")
     }
 }
 
@@ -255,7 +254,7 @@ impl MembershipProof {
     pub fn compute_challenge(&self, pk: &SetupPublic, challenge: Scalar) -> Scalar {
         let mut ch_data = Vec::new();
         self.add_challenge_input(pk, challenge, &mut ch_data);
-        Scalar::hash::<ExpandMsgXmd<Sha256>>(&ch_data, b"split-accum-member")
+        hash_to_scalar(&ch_data, b"split-accum-member")
     }
 }
 
