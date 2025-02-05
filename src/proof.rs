@@ -41,15 +41,10 @@ impl MembershipWitness {
         pk: &SetupPublic,
         mut rng: impl RngCore,
     ) -> Result<PrepareMembershipProof, AccumulatorError> {
-        // Unrevealed blinding scalars
-        let r1 = ZKScalar::random(&mut rng);
-        let r2 = ZKScalar::random(&mut rng);
-        let r3 = ZKScalar::random(&mut rng);
         // The hidden member handle value
         let m = ZKScalar::hidden(self.value, &mut rng);
         // The witness value
         let w = self.witness;
-
         let SignedPartition {
             // The partitioned accumulator value
             commit: v,
@@ -65,6 +60,10 @@ impl MembershipWitness {
         // The signature public key for the epoch
         let epoch_sign = pk.sign_key + pk.epoch_key * Scalar::from(*epoch);
 
+        // Unrevealed blinding scalars
+        let r1 = ZKScalar::random(&mut rng);
+        let r2 = ZKScalar::random(&mut rng);
+        let r3 = ZKScalar::random(&mut rng);
         let ri = (r1.secret * r3.secret).invert().unwrap();
         // 1/r1
         let r1i = ri * r3.secret;
