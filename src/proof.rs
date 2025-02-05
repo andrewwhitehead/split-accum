@@ -42,30 +42,52 @@ impl MembershipWitness {
         pk: &SetupPublic,
         mut rng: impl RngCore,
     ) -> Result<PrepareMembershipProof, AccumulatorError> {
+        // Unrevealed blinding scalars
         let r1 = ZKScalar::random(&mut rng);
         let r2 = ZKScalar::random(&mut rng);
         let r3 = ZKScalar::random(&mut rng);
+        // The hidden member handle value
         let m = ZKScalar::hidden(self.value, &mut rng);
+        // The witness value
         let w = self.witness;
+
         let SignedPartition {
+            // The partitioned accumulator value
             commit: v,
+            // The accumulator value in the G2 subgroup
             g2commit: u,
+            // The signature over the accumulator value and epoch
             signature: s,
+            // The epoch of the signature
             epoch,
             ..
         } = &self.signature;
+
+        // The signature public key for the epoch
+        let epoch_sign = pk.sign_key + pk.epoch_key * Scalar::from(*epoch);
+
         let ri = (r1.secret * r3.secret).invert().unwrap();
+        // 1/r1
         let r1i = ri * r3.secret;
+        // 1/r3
         let r3i = ri * r1.secret;
 
+        // The blinded witness value W'
         let w_p = w * (r1.secret * r2.secret);
+        // The blinded accumulator value V'
         let v_p = v * r1.secret;
+        // The blinded accumulator value in the G2 subgroup
         let u_p = u * r1.secret;
+        // \bar{W} <- V'r2 - W'm = W'a
         let w_b = v_p * r2.secret - w_p * m.secret;
+        // Prove the calculation of \bar{W}
         let t1 = v_p * r2.blind + w_p * m.blind;
+        // The blinded signature value, S' = Sr3/r1
         let s_p = s * (r3.secret * r1i);
-        let epoch_sign = pk.sign_key + pk.epoch_key * Scalar::from(*epoch);
+        // The blinded value K' = (G2x + G2y•epoch + U)r1/r3,
+        // calculated such that e(S', K') = e(G1, G2)
         let k_p = (epoch_sign + u) * (r1.secret * r3i);
+        // Prove the calculation of K'
         let t2 = k_p * r3.blind + epoch_sign * r1.blind;
 
         Ok(PrepareMembershipProof {
@@ -172,7 +194,8 @@ impl MembershipProof {
         let ch = self.compute_challenge(pk, *challenge);
         let check_challenge = ch.ct_eq(&challenge);
 
-        // Combining the pairings using randomness
+        // Combining the pairings using the challenge as randomness
+        // (may want to require another RNG instance here):
         // e(S', K') =? e(G1, G2)
         // e(W', G2a) =? e(Wb, G2)
         // e(G1, U') =? e(V', G2)
