@@ -37,7 +37,8 @@ A few components are employed here:
 
 ## General performance characteristics
 
-Performance numbers are currently evaluated on a 2021 Macbook Pro.
+Performance numbers are currently evaluated on a 2021 Macbook Pro. Performance would be lower
+on mobile devices, but is still expected to be reasonable.
 
 - Each revocation can be encoded in 52 bytes (+ framing)
 - Each epoch update is 148 bytes per partition (+ framing)
@@ -57,7 +58,6 @@ For a concrete example (sizes are adjustable according to desired performance):
 - Each holder processes 250 updates per day in around 25ms.
 - After 60 days without updating, a holder would download 37.5Mb and process 15,000
   updates in around 2s.
-- Performance would be lower on mobile devices, but is still expected to be reasonable.
 
 A formal write-up of the security analysis will be forthcoming.
 
