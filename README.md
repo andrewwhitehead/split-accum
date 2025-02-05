@@ -16,10 +16,11 @@ A few components are employed here:
 
 - An efficient bilinear accumulator in line with [KB21], which is only updated upon
   revocations.
-- A new batch update protocol, which is a bit smaller and more efficient than [VB20].
-- Signatures over individual accumulator states, tied to specific epoch identifiers
-  (based on the signature construction from [BW07], under the Hidden Strong Diffie-Helman
-  assumption).
+- A new batch update protocol, which is a bit smaller and more efficient than [VB20]
+  (for deletions only).
+- Signatures over individual accumulator states, tied to specific epoch identifiers.
+  This is based on the signature construction from [BW07], under the Hidden Strong Diffie-Helman
+  assumption.
 - A efficient zero-knowledge proof of membership that does not reveal the member value or
   the partitioned accumulator value.
 - Update logs, used by holders to update their non-revocation proofs (not yet implemented).
@@ -34,7 +35,9 @@ A few components are employed here:
   a multi-message elliptic curve signature supporting partial disclosure, such as BBS or PS.
   This repository does not implement signatures for member handles.
 
-General statistics (performance evaluated on a 2021 Macbook Pro):
+## General performance characteristics
+
+Performance numbers are currently evaluated on a 2021 Macbook Pro.
 
 - Each revocation can be encoded in 52 bytes (+ framing)
 - Each epoch update is 148 bytes per partition (+ framing)
