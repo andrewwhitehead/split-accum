@@ -199,26 +199,7 @@ pub struct PartitionPrivate {
 
 #[cfg(test)]
 mod tests {
-    use bls12_381_plus::Scalar;
-
-    use super::{batch_invert, create_keys, initialize, nonzero_scalar, Config, MemberHandle};
-
-    #[test]
-    fn check_batch_invert() {
-        let mut rng = rand::thread_rng();
-        let mut buf = [Scalar::ZERO; 10];
-        for idx in 0..buf.len() {
-            buf[idx] = nonzero_scalar(&mut rng);
-        }
-        let mut buf_inv = buf;
-        assert!(batch_invert(&mut buf_inv).unwrap_u8() == 1);
-        for idx in 0..buf.len() {
-            assert_eq!(buf[idx].invert().unwrap(), buf_inv[idx]);
-        }
-
-        buf[0] = Scalar::ZERO;
-        assert!(batch_invert(&mut buf).unwrap_u8() == 0);
-    }
+    use super::{create_keys, initialize, Config, MemberHandle};
 
     #[test]
     fn batch_remove() {

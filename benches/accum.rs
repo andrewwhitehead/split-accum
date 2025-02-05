@@ -10,12 +10,11 @@ const BATCHES: &[u32] = &[10, 100, 1000];
 fn bench_accum(c: &mut Criterion) {
     let mut group = c.benchmark_group("accumulator");
 
-    let rng = thread_rng();
     let config = manager::Config {
         partition_size: 1000,
         capacity: 1000_000,
     };
-    let (sk, pk) = manager::create_keys(&config, rng);
+    let (sk, pk) = manager::create_keys(&config, thread_rng());
     let accums = manager::initialize(&config, &sk);
     let epoch0 = 0;
     let epoch1 = 1;
@@ -80,6 +79,21 @@ fn bench_accum(c: &mut Criterion) {
             },
         );
     }
+
+    group.bench_function("create membership proof", |b| {
+        b.iter(|| {
+            let prepare = witness.prepare_proof(&pk, thread_rng()).unwrap();
+            let challenge = prepare.compute_challenge();
+            black_box(prepare.finalize(&challenge));
+        })
+    });
+
+    let prepare = witness.prepare_proof(&pk, thread_rng()).unwrap();
+    let challenge = prepare.compute_challenge();
+    let proof = prepare.finalize(&challenge);
+    group.bench_function("verify membership proof", |b| {
+        b.iter(|| proof.verify(&pk, &challenge).unwrap())
+    });
 }
 
 criterion_group!(

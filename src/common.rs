@@ -1,5 +1,6 @@
 //! Accumulator implementation
 
+use rand::RngCore;
 use std::{fmt, vec::Vec};
 
 use bls12_381_plus::{
@@ -8,7 +9,6 @@ use bls12_381_plus::{
     group::{Curve, Group},
     multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared, G2Projective, Scalar,
 };
-use rand::RngCore;
 
 /// Define the configuration parameters for the accumulator.
 #[derive(Debug)]
@@ -26,6 +26,8 @@ pub enum AccumulatorError {
     InvalidMember,
     /// An invalid partition value was provided for this context.
     InvalidPartition,
+    /// A membership proof failed validation.
+    InvalidProof,
     /// A partition signature failed validation.
     InvalidSignature,
     /// A membership witness failed validation.
@@ -117,6 +119,13 @@ impl SetupPublic {
         .final_exponentiation()
         .is_identity();
         sig_check & commit_check
+    }
+
+    /// Add the public key to a Fiat-Shamir transcript.
+    pub fn add_challenge_input(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.member_key.to_compressed());
+        out.extend_from_slice(&self.sign_key.to_compressed());
+        out.extend_from_slice(&self.epoch_key.to_compressed());
     }
 }
 

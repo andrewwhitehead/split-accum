@@ -4,3 +4,4 @@
 
 pub mod common;
 pub mod manager;
+mod proof;
