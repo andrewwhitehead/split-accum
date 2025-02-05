@@ -55,7 +55,8 @@ For a concrete example (sizes are adjustable according to desired performance):
 - Revoking 1% of members per day (a much higher rate than generally expected).
 - About 640Kb per day is added to each log.
 - Each holder processes 250 updates per day in around 25ms.
-- After 60 days a holder would download 37.5Mb and process 15,000 updates in around 2s.
+- After 60 days without updating, a holder would download 37.5Mb and process 15,000
+  updates in around 2s.
 - Performance would be lower on mobile devices, but is still expected to be reasonable.
 
 A formal write-up of the security analysis will be forthcoming.
