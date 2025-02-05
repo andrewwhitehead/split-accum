@@ -10,7 +10,7 @@ into partitions such that each membership handle belongs to a single partition.
 The holder of a membership witness only needs to update it against revocations in
 their own partition, which may be orders of magnitude smaller than the combined
 registry. Reversal of revocations is not supported, except by rolling back the
-update log.
+update log. A formal write-up of the security analysis will be forthcoming.
 
 A few components are employed here:
 
@@ -59,7 +59,14 @@ For a concrete example (sizes are adjustable according to desired performance):
 - After 60 days without updating, a holder would download 37.5Mb and process 15,000
   updates in around 2s.
 
-A formal write-up of the security analysis will be forthcoming.
+To run the benchmarks, execute in the root directory:
+
+```sh
+cargo bench
+```
+
+These benchmarks cover the essential accumulator operations: creating and applying batch
+updates, signing states, and proving and verifying membership proofs.
 
 [Ngu05]: https://eprint.iacr.org/2005/123
 [BW07]: https://link.springer.com/chapter/10.1007/978-3-540-71677-8_1
