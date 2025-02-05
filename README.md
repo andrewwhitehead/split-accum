@@ -10,7 +10,8 @@ into partitions such that each membership handle belongs to a single partition.
 The holder of a membership witness only needs to update it against revocations in
 their own partition, which may be orders of magnitude smaller than the combined
 registry. Reversal of revocations is not supported, except by rolling back the
-update log. A formal write-up of the security analysis will be forthcoming.
+update log. Proofs of revocation (non-membership proofs) are also not supported.
+A formal write-up of the security analysis will be forthcoming.
 
 A few components are employed here:
 
