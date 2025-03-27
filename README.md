@@ -4,7 +4,7 @@ This is a proof-of-concept of a split accumulator system for scaling anonymous
 revocation to large numbers of credential holders (100M+) while maintaining
 privacy. Witness updates are non-interactive.
 
-The bilinear accumulator of [Ngu05] is the basis, employing a pairing-friendly
+The bilinear accumulator of [Nguyen05] is the basis, employing a pairing-friendly
 elliptic curve (BLS12-381 is currently assumed). A single accumulator is split
 into partitions such that each membership handle belongs to a single partition.
 The holder of a membership witness only needs to update it against revocations in
@@ -49,18 +49,19 @@ on mobile devices, but is still expected to be reasonable.
   as individual partitions are evaluated independently.
 - 100 partitions can be signed in about 50ms. Once a partition is fully revoked, it does not
   need to be signed again.
-- A membership proof can be generated in about 7ms and verified in about 8ms. Only the
+- For the split accumulator, a membership proof can be generated in about 8ms and verified in
+  about 9ms. For the traditional accumulator, the times are each about 2ms, and only the
   verifier needs to perform pairing operations.
-- A membership proof is 516 bytes and the revocation manager's public key is 288 bytes.
+- The proof size is 532 bytes for the split accumulator and 160 bytes for the traditional
+  accumulator.
 
 For a concrete example (sizes are adjustable according to desired performance):
 
-- 10,000,000 members split into 400 partitions of 25,000, with 50 partitions (1,250,000
-  members) assigned to each of 8 update logs.
-- Revoking 1% of members per day (a much higher rate than generally expected).
-- About 640Kb per day is added to each log.
-- Each holder processes 250 updates per day in around 25ms.
-- After 60 days without updating, a holder would download 37.5Mb and process 15,000
+- Create a registry of size 80,000,000 split into 500 partitions of 160,000 members each.
+- Revoking 600 members per batch, and 300 batches/year over a 5-year lifespan.
+- About 640Kb per day is added to the log.
+- Each holder normally processes 250 updates per day in around 25ms.
+- After 60 days without updating, a holder would download 37.5Mb before processing 15,000
   updates in around 2s.
 
 A smaller registry of 10,000 members split into 4 partitions would grow by approximately
@@ -77,7 +78,7 @@ cargo bench
 These benchmarks cover the essential accumulator operations: creating and applying batch
 updates, signing states, and proving and verifying membership proofs.
 
-[Ngu05]: https://eprint.iacr.org/2005/123
+[Nguyen05]: https://eprint.iacr.org/2005/123
 [BW07]: https://link.springer.com/chapter/10.1007/978-3-540-71677-8_1
 [VB20]: https://eprint.iacr.org/2020/777
 [KB21]: https://eprint.iacr.org/2021/638
