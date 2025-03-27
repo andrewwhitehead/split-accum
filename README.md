@@ -55,14 +55,18 @@ on mobile devices, but is still expected to be reasonable.
 - The proof size is 532 bytes for the split accumulator and 160 bytes for the traditional
   accumulator.
 
-For a concrete example (sizes are adjustable according to desired performance):
+For a concrete example (partitioning is adjustable according to desired performance):
 
-- Create a registry of size 80,000,000 split into 500 partitions of 160,000 members each.
-- Revoking 600 members per batch, and 300 batches/year over a 5-year lifespan.
-- About 640Kb per day is added to the log.
-- Each holder normally processes 250 updates per day in around 25ms.
-- After 60 days without updating, a holder would download 37.5Mb before processing 15,000
-  updates in around 2s.
+- Consider a registry of size 80,000,000, split into 200 partitions of 400,000 members each.
+- Revoking 600 members per batch, and 300 batches per year over a 5-year lifespan, there would
+  be a total of 900,000 revocations.
+- Under the traditional accumulator, witness updates might be applied in 30ms per batch, for a
+  potential 45s computation to update a witness from the beginning of the log. About 30Kb is
+  added to the log per batch.
+- Under the split accumulator, the average size of an update for a single holder would be 200
+  times smaller, and some updates might not produce any deletions within the holder's partition.
+  Assuming an average size of 3 revocations per batch, the total time to apply all updates
+  against a witness might be 4.5s. About 60Kb is added to the log per batch.
 
 A smaller registry of 10,000 members split into 4 partitions would grow by approximately
 5.6Kb/day at a rate of 1% revocation, maxing out at about 560Kb when fully revoked.
