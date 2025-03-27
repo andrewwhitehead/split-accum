@@ -6,18 +6,26 @@ use std::{fmt, vec::Vec};
 use bls12_381_plus::{
     elliptic_curve::{hash2curve::ExpandMsgXmd, subtle::Choice},
     ff::Field,
-    group::{Curve, Group},
-    multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared, G2Projective, Scalar,
+    Scalar,
 };
 use sha2::Sha256;
 
-/// Define the configuration parameters for the accumulator.
-#[derive(Debug)]
-pub struct Config {
-    /// The size of a each partition.
-    pub partition_size: u32,
-    /// The total capacity of the accumulator.
-    pub capacity: u32,
+// use crate::manager::{
+//     Accumulator, AccumulatorPublicKey, PartitionSignature, PartitioningPublicKey, RegistryPublic,
+//     SplitRegistryPublic,
+// };
+
+/// The type of epoch identifiers.
+pub type EpochType = u32;
+/// The type of member and partition indexes.
+pub type IndexType = u32;
+
+/// Compute an encoded member value from an index.
+/// The caller must ensure that the index is non-zero and
+/// appropriate for the current partition or registry.
+pub fn compute_member_value(index: IndexType) -> Scalar {
+    debug_assert!(index != 0, "Member index must not be zero");
+    Scalar::from(index)
 }
 
 /// Possible error cases from split accumulator usage.
@@ -43,221 +51,24 @@ impl fmt::Display for AccumulatorError {
     }
 }
 
-/// An accumulator public key.
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub struct SetupPublic {
-    /// The public key for verifying member accumulation.
-    pub member_key: G2Affine,
-    /// The public key for verifying signatures.
-    pub sign_key: G2Affine,
-    /// The public key for encoding epoch information.
-    pub epoch_key: G2Affine,
-}
-
-impl SetupPublic {
-    /// Privately verify a membership witness against its partition state and signature.
-    pub fn verify_membership_witness(
-        &self,
-        member: &MembershipWitness,
-    ) -> Result<(), AccumulatorError> {
-        let MembershipWitness {
-            signature, witness, ..
-        } = member;
-        let pairing = multi_miller_loop(&[
-            (
-                &witness.to_affine(),
-                &G2Prepared::from(
-                    (self.member_key + G2Projective::GENERATOR * member.value).to_affine(),
-                ),
-            ),
-            (
-                &-signature.commit.to_affine(),
-                &G2Prepared::from(G2Affine::generator()),
-            ),
-        ])
-        .final_exponentiation()
-        .is_identity();
-        let check_sig = self._verify_signed_partition(signature);
-        if !bool::from(pairing) {
-            Err(AccumulatorError::InvalidWitness)
-        } else if !bool::from(check_sig) {
-            Err(AccumulatorError::InvalidSignature)
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Verify a signature over an partition state.
-    #[must_use]
-    pub(crate) fn _verify_signed_partition(&self, signature: &SignedPartition) -> Choice {
-        // Combining these pairings using an additional deterministic factor (r),
-        // deterministically chosen.
-        // e(S, G2x + G2y•epoch + U) =? e(G1, G2)
-        // e(V, G2) =? e(G1, U)
-        // => e(S, G2x + G2y•epoch + U)•e(G1•r, U) =? e(G1 + V•r, G2)
-        let mut enc = Vec::with_capacity(48 + 48 + 96);
-        enc.extend_from_slice(&signature.commit.to_compressed());
-        enc.extend_from_slice(&signature.g2commit.to_compressed());
-        enc.extend_from_slice(&signature.signature.to_compressed());
-        let r = hash_to_scalar(&enc, b"pairing factor");
-
-        multi_miller_loop(&[
-            (
-                &signature.signature.to_affine(),
-                &G2Prepared::from(
-                    (self.sign_key
-                        + self.epoch_key * Scalar::from(signature.epoch)
-                        + signature.g2commit)
-                        .to_affine(),
-                ),
-            ),
-            (
-                &(G1Affine::generator() * r).to_affine(),
-                &G2Prepared::from(signature.g2commit.to_affine()),
-            ),
-            (
-                &-(G1Affine::generator() + signature.commit.to_affine() * r).to_affine(),
-                &G2Prepared::from(G2Affine::generator()),
-            ),
-        ])
-        .final_exponentiation()
-        .is_identity()
-    }
-
-    /// Add the public key to a Fiat-Shamir transcript.
-    pub fn add_challenge_input(&self, out: &mut Vec<u8>) {
-        out.extend_from_slice(&self.member_key.to_compressed());
-        out.extend_from_slice(&self.sign_key.to_compressed());
-        out.extend_from_slice(&self.epoch_key.to_compressed());
-    }
-}
-
-/// An accumulated member value associated with a specific partition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MemberHandle {
-    /// The encoded member value
-    pub value: Scalar,
-    /// The partition index
-    pub partition: u32,
-}
-
-impl MemberHandle {
-    /// Calculate the partitioned `MemberHandle` for a global accumulator index.
-    pub fn compute_for_index(
-        config: &Config,
-        index: u32,
-    ) -> Result<MemberHandle, AccumulatorError> {
-        if index == 0 || index > config.capacity {
-            Err(AccumulatorError::InvalidMember)
-        } else {
-            let partition = (index - 1) / config.partition_size;
-            Ok(MemberHandle {
-                value: Scalar::from(index),
-                partition,
-            })
-        }
-    }
-}
-
-/// A batch removal operation for a partitioned accumulator.
 #[derive(Debug, Clone)]
-pub struct BatchRemoval {
-    /// The set of terms and encoded member values.
-    pub values: Vec<(G1Projective, Scalar)>,
-    /// The partition index of the batch operation.
-    pub partition: u32,
+pub struct ZKScalar {
+    pub secret: Scalar,
+    pub blind: Scalar,
 }
 
-/// A signed accumulator state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SignedPartition {
-    /// The state of the partition in the G1 subgroup.
-    pub commit: G1Projective,
-    /// The state of the partition in the G2 subgroup.
-    pub g2commit: G2Projective,
-    /// The signature over the state of the partition and the epoch.
-    pub signature: G1Projective,
-    /// The partition index.
-    pub partition: u32,
-    /// The epoch value.
-    pub epoch: u32,
-}
-
-/// A membership witness against a signed partition state.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MembershipWitness {
-    /// The signed partition state corresponding to this witness.
-    pub signature: SignedPartition,
-    /// The value of the witness against the partition state.
-    pub witness: G1Projective,
-    /// The encoded member value.
-    pub value: Scalar,
-}
-
-impl MembershipWitness {
-    /// Access a `MemberHandle` for this membership witness.
-    pub fn member_handle(&self) -> MemberHandle {
-        MemberHandle {
-            value: self.value,
-            partition: self.signature.partition,
+impl ZKScalar {
+    pub fn hidden(secret: Scalar, rng: &mut impl RngCore) -> Self {
+        Self {
+            secret,
+            blind: nonzero_scalar(rng),
         }
     }
 
-    /// Begin the update process for a membership witness.
-    pub fn begin_update(&self) -> UpdateMembershipWitness {
-        UpdateMembershipWitness {
-            inner: self.clone(),
-        }
-    }
-}
-
-/// A wrapper for a membership witness being updated.
-pub struct UpdateMembershipWitness {
-    inner: MembershipWitness,
-}
-
-impl UpdateMembershipWitness {
-    /// Apply a batch removal operation to this membership witness.
-    pub fn apply_batch_removal(&mut self, batch: &BatchRemoval) -> Result<(), AccumulatorError> {
-        let inner = &self.inner;
-        if inner.signature.partition != batch.partition
-            || batch
-                .values
-                .iter()
-                .any(|(_, member)| member == &inner.value)
-        {
-            Err(AccumulatorError::MemberRemoved)
-        } else {
-            let mut points = Vec::with_capacity(batch.values.len() + 1);
-            points.push(inner.witness);
-            let mut denoms = Vec::with_capacity(batch.values.len() + 1);
-            denoms.push(Scalar::ONE);
-            for (pt, member) in batch.values.iter() {
-                points.push(*pt);
-                let term = member - inner.value;
-                denoms[0] *= term;
-                denoms.push(-term);
-            }
-            // This inversion should never fail as all the terms are checked to be non-zero
-            assert!(bool::from(batch_invert(&mut denoms)), "Inversion error");
-            self.inner.witness = G1Projective::sum_of_products(&points, &denoms);
-            Ok(())
-        }
-    }
-
-    /// After applying all updates in an epoch, update the signature for the membership witness.
-    pub fn finalize_with_signature(
-        self,
-        pk: &SetupPublic,
-        signature: &SignedPartition,
-    ) -> Result<MembershipWitness, AccumulatorError> {
-        if signature.partition != self.inner.signature.partition {
-            Err(AccumulatorError::InvalidSignature)
-        } else {
-            let mut inner = self.inner;
-            inner.signature = signature.clone();
-            pk.verify_membership_witness(&inner)?;
-            Ok(inner)
+    pub fn random(rng: &mut impl RngCore) -> Self {
+        Self {
+            secret: nonzero_scalar(rng),
+            blind: nonzero_scalar(rng),
         }
     }
 }
