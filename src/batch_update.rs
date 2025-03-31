@@ -174,7 +174,8 @@ mod tests {
     fn batch_remove() {
         let mut rng = rand::thread_rng();
         let capacity = 16384;
-        let (sk, pk) = new_registry(capacity, &mut rng);
+        let epoch0 = 0;
+        let (sk, pk) = new_registry(capacity, epoch0, &mut rng);
         let witness1 = sk.create_membership_witness(1).unwrap();
         let witness2 = sk.create_membership_witness(2).unwrap();
         let witness3 = sk.create_membership_witness(3).unwrap();
@@ -186,8 +187,10 @@ mod tests {
             .expect("Error verifying witness");
 
         // test single removal in batch
+        let epoch1 = 1;
         let mut accum1 = sk.clone();
         let update = accum1.remove_members([1]).expect("Error removing members");
+        accum1.set_epoch(epoch1);
         // check new accumulator is equal to the membership witness for a single removed value
         assert_eq!(accum1.accum.active.0, witness1.witness);
         // cannot apply batch update for removed member

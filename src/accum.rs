@@ -8,17 +8,18 @@ use bls12_381_plus::{
 };
 use rand::RngCore;
 
-use crate::batch_update::BatchRemoval;
 use crate::common::{compute_member_value, AccumulatorError, IndexType};
+use crate::{batch_update::BatchRemoval, EpochType};
 
 pub mod proof;
 
 /// Create new public and private keys for an accumulator.
 pub fn new_registry(
     capacity: IndexType,
+    epoch: EpochType,
     rng: &mut impl RngCore,
 ) -> (RegistryPrivate, RegistryPublic) {
-    let sk = RegistryPrivate::new(capacity, rng);
+    let sk = RegistryPrivate::new(capacity, epoch, rng);
     let pk = sk.to_public();
     (sk, pk)
 }
@@ -131,16 +132,18 @@ pub struct RegistryPrivate {
     pub(crate) capacity: IndexType,
     pub(crate) accum_key: AccumulatorPrivateKey,
     pub(crate) accum: AccumulatorPrivate,
+    pub(crate) epoch: EpochType,
 }
 
 impl RegistryPrivate {
     /// Create a new registry.
-    pub fn new(capacity: IndexType, rng: &mut impl RngCore) -> Self {
+    pub fn new(capacity: IndexType, epoch: EpochType, rng: &mut impl RngCore) -> Self {
         let accum_key = AccumulatorPrivateKey::new(capacity, rng);
         RegistryPrivate {
             capacity,
             accum_key,
             accum: AccumulatorPrivate::new(rng),
+            epoch,
         }
     }
 
@@ -179,11 +182,27 @@ impl RegistryPrivate {
         Ok(update)
     }
 
+    /// Access the registry capacity.
+    pub fn capacity(&self) -> IndexType {
+        self.capacity
+    }
+
+    /// Access the current epoch.
+    pub fn epoch(&self) -> EpochType {
+        self.epoch
+    }
+
+    /// Update the current epoch.
+    pub fn set_epoch(&mut self, epoch: EpochType) {
+        self.epoch = epoch;
+    }
+
     /// Get the current public registry state.
     pub fn to_public(&self) -> RegistryPublic {
         RegistryPublic {
             accum_key: self.accum_key.public.clone(),
             accum: self.accum.active,
+            epoch: self.epoch,
         }
     }
 }
@@ -195,6 +214,8 @@ pub struct RegistryPublic {
     pub accum_key: AccumulatorPublicKey,
     /// The current state of the accumulator.
     pub accum: Accumulator,
+    /// The current epoch.
+    pub epoch: EpochType,
 }
 
 impl RegistryPublic {
@@ -217,5 +238,6 @@ impl RegistryPublic {
     pub fn add_challenge_input(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.accum_key.member_key.to_compressed());
         out.extend_from_slice(&self.accum.0.to_compressed());
+        out.extend_from_slice(&self.epoch.to_le_bytes());
     }
 }

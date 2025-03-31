@@ -8,7 +8,8 @@ fn bench_accum(c: &mut Criterion) {
     let mut group = c.benchmark_group("accumulator");
 
     let capacity = 1000_000;
-    let (sk, pk) = split_accum::new_registry(capacity, &mut thread_rng());
+    let epoch0 = 0;
+    let (sk, pk) = split_accum::new_registry(capacity, epoch0, &mut thread_rng());
 
     for count in BATCHES.iter().copied() {
         group.bench_function(BenchmarkId::new("remove members", count), |b| {

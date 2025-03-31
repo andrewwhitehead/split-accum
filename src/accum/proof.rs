@@ -146,7 +146,8 @@ mod tests {
     fn check_member_proof() {
         let mut rng = rand::thread_rng();
         let capacity = 100;
-        let (sk, pk) = new_registry(capacity, &mut rng);
+        let epoch0 = 0;
+        let (sk, pk) = new_registry(capacity, epoch0, &mut rng);
 
         // create a witness
         let witness = sk
