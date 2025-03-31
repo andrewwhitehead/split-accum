@@ -57,6 +57,7 @@ impl AccumulatorPrivateKey {
         &self,
         accum: &Accumulator,
         index: IndexType,
+        epoch: EpochType,
     ) -> MembershipWitness {
         let value = compute_member_value(index);
         // This inversion is not expected to fail, as no member value should equal `-member_key`
@@ -66,6 +67,7 @@ impl AccumulatorPrivateKey {
         MembershipWitness {
             witness: (accum.0 * mul).to_affine(),
             index,
+            epoch,
         }
     }
 }
@@ -124,6 +126,8 @@ pub struct MembershipWitness {
     pub(crate) witness: G1Affine,
     /// The unencoded member index.
     pub(crate) index: IndexType,
+    /// The epoch of the witness.
+    pub(crate) epoch: EpochType,
 }
 
 /// An accumulator private key.
@@ -157,7 +161,7 @@ impl RegistryPrivate {
         } else {
             Ok(self
                 .accum_key
-                .create_membership_witness(&self.accum.active, index))
+                .create_membership_witness(&self.accum.active, index, self.epoch))
         }
     }
 
@@ -224,6 +228,9 @@ impl RegistryPublic {
         &self,
         witness: &MembershipWitness,
     ) -> Result<(), AccumulatorError> {
+        if witness.epoch != self.epoch {
+            return Err(AccumulatorError::EpochMismatch);
+        }
         if bool::from(
             self.accum_key
                 .verify_accumulator_witness(&self.accum, &witness),

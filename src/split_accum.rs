@@ -337,9 +337,11 @@ impl SplitRegistryPrivate {
         if index == 0 || (index - 1) / self.partition_size != partition.index {
             Err(AccumulatorError::InvalidMember)
         } else {
-            let membership = self
-                .accum_key
-                .create_membership_witness(&partition.signature.accum, index);
+            let membership = self.accum_key.create_membership_witness(
+                &partition.signature.accum,
+                index,
+                partition.signature.epoch,
+            );
             Ok(SignedMembershipWitness {
                 membership,
                 partition: partition.signature.clone(),
@@ -374,6 +376,9 @@ impl SplitRegistryPublic {
         &self,
         witness: &SignedMembershipWitness,
     ) -> Result<(), AccumulatorError> {
+        if witness.membership.epoch != witness.partition.epoch {
+            return Err(AccumulatorError::EpochMismatch);
+        }
         let chk_wit = self
             .accum_key
             .verify_accumulator_witness(&witness.partition.accum, &witness.membership);

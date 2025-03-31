@@ -138,6 +138,7 @@ impl UpdateMembershipWitness {
         let witness = MembershipWitness {
             witness: self.witness.to_affine(),
             index: self.index,
+            epoch: registry.epoch,
         };
         registry.verify_membership_witness(&witness)?;
         Ok(witness)
@@ -156,6 +157,7 @@ impl UpdateMembershipWitness {
                 membership: MembershipWitness {
                     witness: self.witness.to_affine(),
                     index: self.index,
+                    epoch: signature.epoch,
                 },
                 partition: signature,
             };

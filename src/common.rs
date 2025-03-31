@@ -31,6 +31,8 @@ pub fn compute_member_value(index: IndexType) -> Scalar {
 /// Possible error cases from split accumulator usage.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccumulatorError {
+    /// There is a mismatch between the witness epoch and the current epoch.
+    EpochMismatch,
     /// An invalid member value was provided for this context.
     InvalidMember,
     /// An invalid partition value was provided for this context.
