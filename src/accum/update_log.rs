@@ -21,21 +21,22 @@ pub struct RegistryUpdateLog(BufWriter<File>);
 
 impl RegistryUpdateLog {
     /// Initialize a new update log.
-    pub fn create(path: impl AsRef<Path>, pk: &RegistryPublic) -> Result<RegistryUpdateLog, Error> {
+    pub fn create(path: impl AsRef<Path>, registry: &RegistryPublic) -> Result<Self, Error> {
         let outfile = BufWriter::new(File::create(path)?);
         let mut slf = Self(outfile);
-        slf.write_epoch(pk.epoch)?;
+        slf.write_epoch(registry)?;
         Ok(slf)
     }
 
     /// Start appending to an update log.
-    pub fn append(path: impl AsRef<Path>) -> Result<RegistryUpdateLog, Error> {
+    pub fn append(path: impl AsRef<Path>) -> Result<Self, Error> {
         let outfile = BufWriter::new(OpenOptions::new().append(true).open(path)?);
         Ok(Self(outfile))
     }
 
     /// Write an epoch update record.
-    pub fn write_epoch(&mut self, epoch: EpochType) -> Result<(), Error> {
+    pub fn write_epoch(&mut self, registry: &RegistryPublic) -> Result<(), Error> {
+        let epoch = registry.epoch;
         assert!(epoch as usize <= u32::MAX as usize);
         // FIXME return an error if an invalid epoch is written
         self.0.write(&[UPDATE_EPOCH])?;
@@ -71,7 +72,6 @@ impl RegistryUpdateLog {
     ) -> Result<MembershipWitness, Error> {
         let mut infile = BufReader::new(File::open(path)?);
         let mut ver = [0u8];
-        let mut epoch_buf = [0u8; (EpochType::BITS as usize) / 8];
         let mut len_buf = [0u8; 4];
         let mut pt_buf = [0u8; 48];
         let mut latest_epoch = None;
@@ -87,9 +87,8 @@ impl RegistryUpdateLog {
             }
             match ver[0] {
                 UPDATE_EPOCH => {
-                    infile.read_exact(&mut epoch_buf)?;
-                    let epoch = EpochType::from_le_bytes(epoch_buf);
-                    println!("update epoch: {epoch} {latest_epoch:?}");
+                    infile.read_exact(&mut len_buf)?;
+                    let epoch = u32::from_le_bytes(len_buf) as EpochType;
                     if latest_epoch.map(|prev| epoch <= prev).unwrap_or(false) {
                         // epoch must be increasing
                         return Err(Error::other(AccumulatorError::InvalidLog));
@@ -112,10 +111,8 @@ impl RegistryUpdateLog {
                             let idx = u32::from_le_bytes(len_buf);
                             batch.values.push((pt, idx as IndexType));
                         }
-                        println!("apply removal");
                         update.apply_batch_removal(&batch).map_err(Error::other)?;
                     } else {
-                        println!("skip removal");
                         infile.seek_relative((count * REMOVE_ENTRY_LEN) as i64)?;
                     }
                 }
@@ -129,15 +126,15 @@ impl RegistryUpdateLog {
         };
         let mut reg = registry.clone();
         reg.epoch = epoch;
-        println!("finalize");
-        let witness = update.finalize_unsigned(registry).map_err(Error::other)?;
+        let witness = update.finalize_unsigned(&reg).map_err(Error::other)?;
         Ok(witness)
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{accum::new_registry, RegistryUpdateLog};
+    use super::RegistryUpdateLog;
+    use crate::accum::new_registry;
 
     #[test]
     fn update_log() {
@@ -171,7 +168,7 @@ mod tests {
         // update the log
         let mut upd1 = RegistryUpdateLog::append(&temp_file).unwrap();
         upd1.write_removal(&batch1).unwrap();
-        upd1.write_epoch(epoch1).unwrap();
+        upd1.write_epoch(&pk1).unwrap();
         upd1.finalize().unwrap();
 
         // update witness for non-removed member
@@ -194,7 +191,7 @@ mod tests {
         // update the log
         let mut upd2 = RegistryUpdateLog::append(&temp_file).unwrap();
         upd2.write_removal(&batch2).unwrap();
-        upd2.write_epoch(epoch2).unwrap();
+        upd2.write_epoch(&pk2).unwrap();
         upd2.finalize().unwrap();
 
         // update previously-updated witness
