@@ -20,6 +20,7 @@ use crate::{
 };
 
 pub mod proof;
+pub mod update_log;
 
 /// Create new public and private keys for an accumulator.
 pub fn new_split_registry(
@@ -32,9 +33,9 @@ pub fn new_split_registry(
     SplitRegistryPublic,
     Vec<PartitionPrivate>,
 ) {
-    let sk = SplitRegistryPrivate::new(capacity, partition_size, rng);
+    let sk = SplitRegistryPrivate::new(capacity, partition_size, epoch, rng);
     let pk = sk.to_public();
-    let partitions = sk.init_partitions(epoch);
+    let partitions = sk.init_partitions();
     (sk, pk, partitions)
 }
 
@@ -188,11 +189,18 @@ pub struct SplitRegistryPrivate {
     partition_key: PartitioningPrivateKey,
     /// A randomized generator used in proofs.
     h: G1Affine,
+    /// The current epoch of the registry.
+    epoch: EpochType,
 }
 
 impl SplitRegistryPrivate {
     /// Create a new split accumulator registry instance.
-    pub fn new(capacity: IndexType, partition_size: IndexType, rng: &mut impl RngCore) -> Self {
+    pub fn new(
+        capacity: IndexType,
+        partition_size: IndexType,
+        epoch: EpochType,
+        rng: &mut impl RngCore,
+    ) -> Self {
         let accum_key = AccumulatorPrivateKey::new(capacity, rng);
         let partition_key = PartitioningPrivateKey::new(rng);
         Self {
@@ -201,11 +209,12 @@ impl SplitRegistryPrivate {
             accum_key,
             partition_key,
             h: G1Projective::random(rng).to_affine(),
+            epoch,
         }
     }
 
     /// Initialize the partitions associated with a split registry.
-    pub fn init_partitions(&self, epoch: EpochType) -> Vec<PartitionPrivate> {
+    pub fn init_partitions(&self) -> Vec<PartitionPrivate> {
         let len = ((self.capacity + self.partition_size - 1) / self.partition_size) as usize;
         let mut ret = Vec::with_capacity(len);
         let mut wnaf = Wnaf::new();
@@ -221,7 +230,7 @@ impl SplitRegistryPrivate {
                     g2accum: G2Affine::generator(),
                     signature: G1Affine::generator(),
                     index: idx as IndexType,
-                    epoch,
+                    epoch: self.epoch,
                 },
                 accum: AccumulatorPrivate {
                     origin: active.clone(),
@@ -231,7 +240,7 @@ impl SplitRegistryPrivate {
                 index: idx as IndexType,
             });
         }
-        self.batch_sign_partitions(&mut ret, epoch);
+        self.batch_sign_partitions(&mut ret);
         ret
     }
 
@@ -265,10 +274,10 @@ impl SplitRegistryPrivate {
     }
 
     /// Sign a partition, producing a signature over the public state for a specific epoch.
-    pub fn sign_partition(&self, partition: &mut PartitionPrivate, epoch: EpochType) {
+    pub fn sign_partition(&self, partition: &mut PartitionPrivate) {
         let accum = &partition.accum;
         let sig_mul = (self.partition_key.signing_key
-            + self.partition_key.epoch_key * Scalar::from(epoch)
+            + self.partition_key.epoch_key * Scalar::from(self.epoch)
             + accum.scalar)
             .invert()
             .expect("Inversion error");
@@ -278,7 +287,7 @@ impl SplitRegistryPrivate {
             g2accum: (G2Affine::generator() * accum.scalar).to_affine(),
             signature,
             index: partition.index,
-            epoch,
+            epoch: self.epoch,
         }
     }
 
@@ -286,7 +295,7 @@ impl SplitRegistryPrivate {
     ///
     /// This is the equivalent of calling `sk.sign_partition(p, epoch)` for each
     /// `p` in `partitions` and collecting the results, although more efficient.
-    pub fn batch_sign_partitions(&self, partitions: &mut [PartitionPrivate], epoch: EpochType) {
+    pub fn batch_sign_partitions(&self, partitions: &mut [PartitionPrivate]) {
         let pcount = partitions.len();
         let mut denoms = Vec::with_capacity(pcount);
         let mut g2proj = Vec::with_capacity(pcount);
@@ -297,7 +306,7 @@ impl SplitRegistryPrivate {
         for part in &*partitions {
             denoms.push(
                 self.partition_key.signing_key
-                    + self.partition_key.epoch_key * Scalar::from(epoch)
+                    + self.partition_key.epoch_key * Scalar::from(self.epoch)
                     + part.accum.scalar,
             );
         }
@@ -323,7 +332,7 @@ impl SplitRegistryPrivate {
                     g2accum: g2commit,
                     signature,
                     index: part.index,
-                    epoch,
+                    epoch: self.epoch,
                 }
             });
     }
@@ -349,12 +358,23 @@ impl SplitRegistryPrivate {
         }
     }
 
+    /// Access the current epoch.
+    pub fn epoch(&self) -> EpochType {
+        self.epoch
+    }
+
+    /// Update the current epoch.
+    pub fn set_epoch(&mut self, epoch: EpochType) {
+        self.epoch = epoch;
+    }
+
     /// Get the public registry definition.
     pub fn to_public(&self) -> SplitRegistryPublic {
         SplitRegistryPublic {
             accum_key: self.accum_key.public.clone(),
             partition_key: self.partition_key.public.clone(),
             h: self.h,
+            epoch: self.epoch,
         }
     }
 }
@@ -368,6 +388,8 @@ pub struct SplitRegistryPublic {
     pub partition_key: PartitioningPublicKey,
     /// A randomized generator used in proving.
     pub h: G1Affine,
+    /// The current epoch.
+    pub epoch: EpochType,
 }
 
 impl SplitRegistryPublic {
@@ -376,7 +398,9 @@ impl SplitRegistryPublic {
         &self,
         witness: &SignedMembershipWitness,
     ) -> Result<(), AccumulatorError> {
-        if witness.membership.epoch != witness.partition.epoch {
+        if witness.membership.epoch != self.epoch
+            || witness.membership.epoch != witness.partition.epoch
+        {
             return Err(AccumulatorError::EpochMismatch);
         }
         let chk_wit = self
@@ -411,29 +435,32 @@ mod tests {
         let capacity = 100;
         let partition_size = 10;
         let epoch0 = 0;
-        let (sk, pk, mut accums) = new_split_registry(capacity, partition_size, epoch0, &mut rng);
+        let (mut sk, pk, mut accums) =
+            new_split_registry(capacity, partition_size, epoch0, &mut rng);
         let mut accum1 = accums[0].clone();
 
         // generate signature for a single accumulator
-        sk.sign_partition(&mut accum1, epoch0);
+        sk.sign_partition(&mut accum1);
         assert_eq!(accum1.signature.epoch, epoch0);
         assert!(bool::from(
             pk.partition_key
                 .verify_partition_signature(&accum1.signature)
         ));
 
-        let epoch1 = 1;
         // check batch signature for single accumulator
-        sk.batch_sign_partitions(&mut accums[..1], epoch1);
+        let epoch1 = 1;
+        sk.set_epoch(epoch1);
+        sk.batch_sign_partitions(&mut accums[..1]);
         assert_eq!(accums[0].signature.epoch, epoch1);
         assert!(bool::from(
             pk.partition_key
                 .verify_partition_signature(&accums[0].signature)
         ));
 
-        let epoch2 = 2;
         // check batch signature for multiple accumulators
-        sk.batch_sign_partitions(&mut accums, epoch2);
+        let epoch2 = 2;
+        sk.set_epoch(epoch2);
+        sk.batch_sign_partitions(&mut accums);
         for accum in &accums {
             assert_eq!(accum.signature.epoch, epoch2);
             assert!(bool::from(

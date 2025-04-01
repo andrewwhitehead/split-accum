@@ -19,6 +19,7 @@ pub use self::{
     split_accum::{
         new_split_registry,
         proof::{PrepareSignedMembershipProof, SignedMembershipProof},
+        update_log::SplitRegistryUpdateLog,
         PartitionPrivate, PartitionSignature, PartitioningPublicKey, SplitRegistryPrivate,
         SplitRegistryPublic,
     },
