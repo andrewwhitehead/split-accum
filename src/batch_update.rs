@@ -6,6 +6,7 @@ use crate::accum::{
 };
 use crate::common::{batch_invert, compute_member_value, AccumulatorError, IndexType};
 use crate::split_accum::{PartitionSignature, SignedMembershipWitness, SplitRegistryPublic};
+use crate::EpochType;
 
 impl MembershipWitness {
     /// Begin the update process for a membership witness.
@@ -81,6 +82,16 @@ impl BatchRemoval {
             },
         ))
     }
+
+    pub(crate) fn accumulator(&self) -> Accumulator {
+        Accumulator(
+            self.values
+                .iter()
+                .map(|v| v.0)
+                .sum::<G1Projective>()
+                .to_affine(),
+        )
+    }
 }
 
 /// A wrapper for a membership witness being updated.
@@ -88,6 +99,7 @@ pub struct UpdateMembershipWitness {
     witness: G1Projective,
     index: IndexType,
     value: Scalar,
+    epoch: EpochType,
     partition: IndexType,
 }
 
@@ -97,6 +109,7 @@ impl UpdateMembershipWitness {
             witness: membership.witness.into(),
             index: membership.index,
             value: compute_member_value(membership.index),
+            epoch: membership.epoch,
             partition,
         }
     }
@@ -128,6 +141,14 @@ impl UpdateMembershipWitness {
             self.witness = G1Projective::sum_of_products(&points, &denoms);
             Ok(())
         }
+    }
+
+    pub fn start_epoch(&self) -> EpochType {
+        self.epoch
+    }
+
+    pub fn partition(&self) -> IndexType {
+        self.partition
     }
 
     /// After applying all updates in an epoch, verify the witness against the current public state.
@@ -233,7 +254,7 @@ mod tests {
         let capacity = 16384;
         let partition_size = 1024;
         let epoch0 = 0;
-        let (sk, pk, accums) = new_split_registry(capacity, partition_size, epoch0, &mut rng);
+        let (mut sk, pk, accums) = new_split_registry(capacity, partition_size, epoch0, &mut rng);
         let mut accum1 = accums[0].clone();
         let witness1 = sk.create_membership_witness(&accum1, 1).unwrap();
         let witness2 = sk.create_membership_witness(&accum1, 2).unwrap();
@@ -250,7 +271,9 @@ mod tests {
             .remove_partition_members(&mut accum1, [1])
             .expect("Error removing members");
         let epoch1 = 1;
-        sk.sign_partition(&mut accum1, epoch1);
+        sk.set_epoch(epoch1);
+        sk.sign_partition(&mut accum1);
+        let pk1 = sk.to_public();
         // check new accumulator is equal to the membership witness for a single removed value
         assert_eq!(accum1.signature.accum.0, witness1.membership.witness);
         // cannot apply batch update for removed member
@@ -261,19 +284,21 @@ mod tests {
         // should not be valid against new signature
         assert!(witness1
             .begin_update()
-            .finalize_signed(&pk, accum1.signature().clone())
+            .finalize_signed(&pk1, accum1.signature().clone())
             .is_err());
         // update witness for non-removed member
         let mut upd_witness = witness2.begin_update();
         assert!(upd_witness.apply_batch_removal(&update).is_ok());
-        assert!(upd_witness.finalize_signed(&pk, accum1.signature()).is_ok());
+        assert!(upd_witness
+            .finalize_signed(&pk1, accum1.signature())
+            .is_ok());
 
         let mut accum2 = accums[0].clone();
         // test multi removal
         let update = sk
             .remove_partition_members(&mut accum2, [1, 2])
             .expect("Error removing members");
-        sk.sign_partition(&mut accum2, epoch1);
+        sk.sign_partition(&mut accum2);
         // cannot apply batch update for removed member
         assert!(witness1
             .begin_update()
@@ -282,11 +307,13 @@ mod tests {
         // should not be valid against new signature
         assert!(witness1
             .begin_update()
-            .finalize_signed(&pk, accum2.signature().clone())
+            .finalize_signed(&pk1, accum2.signature().clone())
             .is_err());
         // update witness for non-removed member
         let mut upd_witness = witness3.begin_update();
         assert!(upd_witness.apply_batch_removal(&update).is_ok());
-        assert!(upd_witness.finalize_signed(&pk, accum2.signature()).is_ok());
+        assert!(upd_witness
+            .finalize_signed(&pk1, accum2.signature())
+            .is_ok());
     }
 }
