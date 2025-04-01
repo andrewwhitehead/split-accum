@@ -1,4 +1,4 @@
-//! Operations for creating and managing split accumulators.
+//! Operations for creating and managing split bilinear accumulators.
 
 use bls12_381_plus::{
     elliptic_curve::subtle::Choice,

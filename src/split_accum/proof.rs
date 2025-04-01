@@ -1,3 +1,5 @@
+//! Zero-knowledge membership proof implementation for split bilinear accumulator.
+
 use bls12_381_plus::{
     elliptic_curve::{group::Curve, subtle::ConstantTimeEq},
     multi_miller_loop, G1Affine, G1Projective, G2Affine, G2Prepared, Gt, Scalar,

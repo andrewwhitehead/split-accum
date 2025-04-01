@@ -33,6 +33,8 @@ pub fn compute_member_value(index: IndexType) -> Scalar {
 pub enum AccumulatorError {
     /// There is a mismatch between the witness epoch and the current epoch.
     EpochMismatch,
+    /// A validation error occurred in parsing the witness update log.
+    InvalidLog,
     /// An invalid member value was provided for this context.
     InvalidMember,
     /// An invalid partition value was provided for this context.
@@ -52,6 +54,8 @@ impl fmt::Display for AccumulatorError {
         fmt::Debug::fmt(&self, f)
     }
 }
+
+impl std::error::Error for AccumulatorError {}
 
 #[derive(Debug, Clone)]
 pub struct ZKScalar {

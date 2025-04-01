@@ -12,6 +12,7 @@ use crate::common::{compute_member_value, AccumulatorError, IndexType};
 use crate::{batch_update::BatchRemoval, EpochType};
 
 pub mod proof;
+pub mod update_log;
 
 /// Create new public and private keys for an accumulator.
 pub fn new_registry(

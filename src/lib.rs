@@ -11,6 +11,7 @@ pub use self::{
     accum::{
         new_registry,
         proof::{MembershipProof, PrepareMembershipProof},
+        update_log::RegistryUpdateLog,
         AccumulatorPublicKey, RegistryPrivate, RegistryPublic,
     },
     batch_update::BatchRemoval,
