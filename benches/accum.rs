@@ -98,7 +98,7 @@ fn bench_split_accum(c: &mut Criterion) {
             b.iter_batched(
                 || accums.clone(),
                 |mut accs| {
-                    let sigs = sk.batch_sign_partitions(&mut accs[..(count as usize)], epoch0);
+                    let sigs = sk.batch_sign_partitions(&mut accs[..(count as usize)]);
                     black_box(sigs)
                 },
                 criterion::BatchSize::LargeInput,
@@ -116,17 +116,20 @@ fn bench_split_accum(c: &mut Criterion) {
     let witness = sk.create_membership_witness(&accums[0], 1000).unwrap();
     for count in BATCHES.iter().copied() {
         let mut accum = accums[0].clone();
-        let batch = sk
+        let mut sk1 = sk.clone();
+        let batch = sk1
             .remove_partition_members(&mut accum, 1..count)
             .expect("Error removing members");
-        sk.sign_partition(&mut accum, epoch1);
+        sk1.set_epoch(epoch1);
+        sk1.sign_partition(&mut accum);
+        let pk1 = sk1.to_public();
         group.bench_function(
             BenchmarkId::new("apply batch removal to membership witness", count),
             |b| {
                 b.iter(|| {
                     let mut update = witness.begin_update();
                     update.apply_batch_removal(&batch).unwrap();
-                    black_box(update.finalize_signed(&pk, accum.signature()).unwrap());
+                    black_box(update.finalize_signed(&pk1, accum.signature()).unwrap());
                 })
             },
         );
