@@ -24,10 +24,10 @@ A few components are employed here:
   Diffie-Hellman assumption.
 - A efficient zero-knowledge proof of membership that does not reveal the member value or
   the partitioned accumulator value.
-- Update logs, used by holders to update their non-revocation proofs (not demonstrated in this
-  PoC yet). Multiple partitions are contained in each log, and for large or long-running
-  registries, multiple log files may be employed. The number of member handles assigned to an
-  individual log should be high enough to avoid correlation of holders.
+- Update logs, used by holders to update their non-revocation proofs. Multiple partitions
+  are contained in each log, and for large or long-running registries, multiple log files
+  may be employed. The number of member handles assigned to an individual log should be high
+  enough to avoid correlation of holders.
 - Revocation managers would be required to publish the latest epoch value, or a policy for
   validating the epoch value of non-revocation proofs (f.ex. a timestamp within the past 24
   hours).
@@ -43,7 +43,7 @@ Performance numbers are currently evaluated on a 2021 Macbook Pro. Performance w
 on mobile devices, but is still expected to be reasonable.
 
 - Each revocation can be encoded in 52 bytes (+ framing)
-- Each epoch update is 144 bytes per partition (+ framing)
+- Each epoch update is 148 bytes per partition (+ framing)
 - Batch removal of 100 members from a partition is currently about 14ms, and applying the
   batch removal as a holder is about 12ms. Updates to the registry can be multi-threaded
   as individual partitions are evaluated independently.
@@ -62,11 +62,12 @@ For a concrete example (partitioning is adjustable according to desired performa
   be a total of 900,000 revocations.
 - Under the traditional accumulator, witness updates might be applied in 30ms per batch, for a
   potential 45s computation to update a witness from the beginning of the log. About 30Kb is
-  added to the log per batch.
+  added to the log per batch, and the maximum size of the log is about 45MB.
 - Under the split accumulator, the average size of an update for a single holder would be 200
   times smaller, and some updates might not produce any deletions within the holder's partition.
-  Assuming an average size of 3 revocations per batch, the total time to apply all updates
-  against a witness might be 4.5s. About 60Kb is added to the log per batch.
+  Assuming an average size of 3 revocations per batch, per partition, the total time to apply all
+  updates against a witness might be 4.5s. About 60Kb is added to the log per batch, and the
+  maximum size of the log is about 90MB.
 
 A smaller registry of 10,000 members split into 4 partitions would grow by approximately
 5.6Kb/day at a rate of 1% revocation, maxing out at about 560Kb when fully revoked.
