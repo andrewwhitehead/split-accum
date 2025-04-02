@@ -1,7 +1,7 @@
 //! Sample update log implementation for the split bilinear accumulator.
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Error, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use bls12_381_plus::{G1Affine, G1Projective, G2Affine};
@@ -26,7 +26,7 @@ impl SplitRegistryUpdateLog {
         path: impl AsRef<Path>,
         registry: &SplitRegistryPublic,
         partitions: &[PartitionPrivate],
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, AccumulatorError> {
         let outfile = BufWriter::new(File::create(path)?);
         let mut slf = Self(outfile);
         slf.write_epoch(registry, partitions)?;
@@ -34,7 +34,7 @@ impl SplitRegistryUpdateLog {
     }
 
     /// Start appending to an update log.
-    pub fn append(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn append(path: impl AsRef<Path>) -> Result<Self, AccumulatorError> {
         let outfile = BufWriter::new(OpenOptions::new().append(true).open(path)?);
         Ok(Self(outfile))
     }
@@ -44,7 +44,7 @@ impl SplitRegistryUpdateLog {
         &mut self,
         registry: &SplitRegistryPublic,
         partitions: &[PartitionPrivate],
-    ) -> Result<(), Error> {
+    ) -> Result<(), AccumulatorError> {
         let epoch = registry.epoch;
         assert!(epoch as usize <= u32::MAX as usize);
         let count = partitions
@@ -72,7 +72,7 @@ impl SplitRegistryUpdateLog {
     }
 
     /// Write a batch removal record.
-    pub fn write_removals(&mut self, updates: &[BatchRemoval]) -> Result<(), Error> {
+    pub fn write_removals(&mut self, updates: &[BatchRemoval]) -> Result<(), AccumulatorError> {
         assert!(updates.len() <= u32::MAX as usize);
         self.0.write(&[UPDATE_REMOVE])?;
         self.0.write(&(updates.len() as u32).to_le_bytes())?;
@@ -92,7 +92,7 @@ impl SplitRegistryUpdateLog {
     }
 
     /// Finalize a log update, flushing to the disk.
-    pub fn finalize(mut self) -> Result<(), Error> {
+    pub fn finalize(mut self) -> Result<(), AccumulatorError> {
         self.0.flush()?;
         Ok(())
     }
@@ -102,7 +102,7 @@ impl SplitRegistryUpdateLog {
         path: impl AsRef<Path>,
         registry: &SplitRegistryPublic,
         witness: &SignedMembershipWitness,
-    ) -> Result<SignedMembershipWitness, Error> {
+    ) -> Result<SignedMembershipWitness, AccumulatorError> {
         let mut infile = BufReader::new(File::open(path)?);
         let mut ver = [0u8];
         let mut len_buf = [0u8; 4];
@@ -117,7 +117,7 @@ impl SplitRegistryUpdateLog {
         loop {
             let len = infile.read(&mut ver)?;
             if len == 0 {
-                println!("end log");
+                // acceptable EOF
                 break;
             }
             match ver[0] {
@@ -126,7 +126,6 @@ impl SplitRegistryUpdateLog {
                     let epoch = u32::from_le_bytes(len_buf) as EpochType;
                     infile.read_exact(&mut len_buf)?;
                     let count = u32::from_le_bytes(len_buf) as usize;
-                    println!("update epoch: {epoch} {latest_epoch:?}");
                     let mut next_epoch = None;
                     for _ in 0..count {
                         infile.read_exact(&mut sig_buf)?;
@@ -136,11 +135,11 @@ impl SplitRegistryUpdateLog {
                         }
                     }
                     let Some(epoch) = next_epoch else {
-                        return Err(Error::other(AccumulatorError::MemberRemoved));
+                        return Err(AccumulatorError::MemberRemoved);
                     };
                     if latest_epoch.map(|prev| epoch.0 <= prev.0).unwrap_or(false) {
                         // epoch must be increasing
-                        return Err(Error::other(AccumulatorError::InvalidLog));
+                        return Err(AccumulatorError::InvalidLog);
                     }
                     latest_epoch = Some(epoch);
                 }
@@ -164,40 +163,37 @@ impl SplitRegistryUpdateLog {
                                 infile.read_exact(&mut len_buf)?;
                                 let Some(pt) = G1Projective::from_compressed(&g1_buf).into_option()
                                 else {
-                                    return Err(Error::other(AccumulatorError::InvalidLog));
+                                    return Err(AccumulatorError::InvalidLog);
                                 };
                                 let idx = u32::from_le_bytes(len_buf);
                                 batch.values.push((pt, idx as IndexType));
                             }
-                            println!("apply removal {index}");
-                            update.apply_batch_removal(&batch).map_err(Error::other)?;
+                            update.apply_batch_removal(&batch)?;
                         } else {
-                            println!("skip removal {index}");
                             infile.seek_relative((count * REMOVE_ENTRY_LEN) as i64)?;
                         }
                     }
                 }
                 _ => {
-                    return Err(Error::other(AccumulatorError::InvalidLog));
+                    return Err(AccumulatorError::InvalidLog);
                 }
             }
         }
         let Some((epoch, sig)) = latest_epoch else {
-            return Err(Error::other(AccumulatorError::MemberRemoved));
+            return Err(AccumulatorError::MemberRemoved);
         };
         // FIXME update only as far as the registry epoch?
         let mut reg = registry.clone();
         reg.epoch = epoch;
-        println!("finalize");
         let sig = {
             let mut g2_buf = [0u8; 96];
             g2_buf.copy_from_slice(&sig[4..100]);
             g1_buf.copy_from_slice(&sig[100..]);
             let Some(g2accum) = G2Affine::from_compressed(&g2_buf).into_option() else {
-                return Err(Error::other(AccumulatorError::InvalidLog));
+                return Err(AccumulatorError::InvalidLog);
             };
             let Some(signature) = G1Affine::from_compressed(&g1_buf).into_option() else {
-                return Err(Error::other(AccumulatorError::InvalidLog));
+                return Err(AccumulatorError::InvalidLog);
             };
             // FIXME keep old accum if no batch is applied
             let accum = batch.accumulator();
@@ -209,7 +205,7 @@ impl SplitRegistryUpdateLog {
                 index: update.partition(),
             }
         };
-        let witness = update.finalize_signed(&reg, sig).map_err(Error::other)?;
+        let witness = update.finalize_signed(&reg, sig)?;
         Ok(witness)
     }
 }
@@ -245,8 +241,6 @@ mod tests {
         let batch1 = sk1
             .remove_partition_members(&mut accums[0], [2, 3])
             .expect("Error removing members");
-        println!("remove from {}", accums[0].index);
-        println!("batch {}", batch1.partition);
         sk1.set_epoch(epoch1);
         sk1.batch_sign_partitions(&mut accums);
         let pk1 = sk1.to_public();

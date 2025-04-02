@@ -10,11 +10,6 @@ use bls12_381_plus::{
 };
 use sha2::Sha256;
 
-// use crate::manager::{
-//     Accumulator, AccumulatorPublicKey, PartitionSignature, PartitioningPublicKey, RegistryPublic,
-//     SplitRegistryPublic,
-// };
-
 /// The type of epoch identifiers.
 pub type EpochType = u32;
 /// The type of member and partition indexes.
@@ -47,6 +42,8 @@ pub enum AccumulatorError {
     InvalidWitness,
     /// The witness' member has been removed and the witness cannot be updated.
     MemberRemoved,
+    /// Wrap IO errors from log operations.
+    Io(std::io::ErrorKind),
 }
 
 impl fmt::Display for AccumulatorError {
@@ -55,7 +52,13 @@ impl fmt::Display for AccumulatorError {
     }
 }
 
-impl std::error::Error for AccumulatorError {}
+impl core::error::Error for AccumulatorError {}
+
+impl From<std::io::Error> for AccumulatorError {
+    fn from(value: std::io::Error) -> Self {
+        AccumulatorError::Io(value.kind())
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct ZKScalar {

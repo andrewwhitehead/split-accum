@@ -1,7 +1,7 @@
 //! Sample update log implementation for the bilinear accumulator.
 
 use std::fs::{File, OpenOptions};
-use std::io::{BufReader, BufWriter, Error, Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use bls12_381_plus::G1Projective;
@@ -21,7 +21,10 @@ pub struct RegistryUpdateLog(BufWriter<File>);
 
 impl RegistryUpdateLog {
     /// Initialize a new update log.
-    pub fn create(path: impl AsRef<Path>, registry: &RegistryPublic) -> Result<Self, Error> {
+    pub fn create(
+        path: impl AsRef<Path>,
+        registry: &RegistryPublic,
+    ) -> Result<Self, AccumulatorError> {
         let outfile = BufWriter::new(File::create(path)?);
         let mut slf = Self(outfile);
         slf.write_epoch(registry)?;
@@ -29,13 +32,13 @@ impl RegistryUpdateLog {
     }
 
     /// Start appending to an update log.
-    pub fn append(path: impl AsRef<Path>) -> Result<Self, Error> {
+    pub fn append(path: impl AsRef<Path>) -> Result<Self, AccumulatorError> {
         let outfile = BufWriter::new(OpenOptions::new().append(true).open(path)?);
         Ok(Self(outfile))
     }
 
     /// Write an epoch update record.
-    pub fn write_epoch(&mut self, registry: &RegistryPublic) -> Result<(), Error> {
+    pub fn write_epoch(&mut self, registry: &RegistryPublic) -> Result<(), AccumulatorError> {
         let epoch = registry.epoch;
         assert!(epoch as usize <= u32::MAX as usize);
         // FIXME return an error if an invalid epoch is written
@@ -45,7 +48,7 @@ impl RegistryUpdateLog {
     }
 
     /// Write a batch removal record.
-    pub fn write_removal(&mut self, update: &BatchRemoval) -> Result<(), Error> {
+    pub fn write_removal(&mut self, update: &BatchRemoval) -> Result<(), AccumulatorError> {
         assert!(update.values.len() <= u32::MAX as usize);
         let count = update.values.len() as u32;
         self.0.write(&[UPDATE_REMOVE])?;
@@ -59,7 +62,7 @@ impl RegistryUpdateLog {
     }
 
     /// Finalize a log update, flushing to the disk.
-    pub fn finalize(mut self) -> Result<(), Error> {
+    pub fn finalize(mut self) -> Result<(), AccumulatorError> {
         self.0.flush()?;
         Ok(())
     }
@@ -69,7 +72,7 @@ impl RegistryUpdateLog {
         path: impl AsRef<Path>,
         registry: &RegistryPublic,
         witness: &MembershipWitness,
-    ) -> Result<MembershipWitness, Error> {
+    ) -> Result<MembershipWitness, AccumulatorError> {
         let mut infile = BufReader::new(File::open(path)?);
         let mut ver = [0u8];
         let mut len_buf = [0u8; 4];
@@ -83,6 +86,7 @@ impl RegistryUpdateLog {
         loop {
             let len = infile.read(&mut ver)?;
             if len == 0 {
+                // acceptable EOF
                 break;
             }
             match ver[0] {
@@ -91,7 +95,7 @@ impl RegistryUpdateLog {
                     let epoch = u32::from_le_bytes(len_buf) as EpochType;
                     if latest_epoch.map(|prev| epoch <= prev).unwrap_or(false) {
                         // epoch must be increasing
-                        return Err(Error::other(AccumulatorError::InvalidLog));
+                        return Err(AccumulatorError::InvalidLog);
                     }
                     latest_epoch = Some(epoch);
                 }
@@ -106,27 +110,27 @@ impl RegistryUpdateLog {
                             infile.read_exact(&mut len_buf)?;
                             let Some(pt) = G1Projective::from_compressed(&pt_buf).into_option()
                             else {
-                                return Err(Error::other(AccumulatorError::InvalidLog));
+                                return Err(AccumulatorError::InvalidLog);
                             };
                             let idx = u32::from_le_bytes(len_buf);
                             batch.values.push((pt, idx as IndexType));
                         }
-                        update.apply_batch_removal(&batch).map_err(Error::other)?;
+                        update.apply_batch_removal(&batch)?;
                     } else {
                         infile.seek_relative((count * REMOVE_ENTRY_LEN) as i64)?;
                     }
                 }
                 _ => {
-                    return Err(Error::other(AccumulatorError::InvalidLog));
+                    return Err(AccumulatorError::InvalidLog);
                 }
             }
         }
         let Some(epoch) = latest_epoch else {
-            return Err(Error::other(AccumulatorError::InvalidLog));
+            return Err(AccumulatorError::InvalidLog);
         };
         let mut reg = registry.clone();
         reg.epoch = epoch;
-        let witness = update.finalize_unsigned(&reg).map_err(Error::other)?;
+        let witness = update.finalize_unsigned(&reg)?;
         Ok(witness)
     }
 }
