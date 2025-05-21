@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-use bls12_381_plus::{G1Affine, G1Projective, G2Affine};
+use bls12_381_plus::{G1Affine, G2Affine};
 
 use crate::batch_update::BatchRemoval;
 use crate::{AccumulatorError, EpochType, IndexType};
@@ -18,6 +18,9 @@ const SIGNATURE_LEN: usize = 148;
 
 /// This structure implements a basic update log, which serializes epoch
 /// updates and batch removal operations in a compressed binary format.
+///
+/// NB: This could be optimized by only outputting 'g2accum' when a
+/// partition has actually been updated.
 pub struct SplitRegistryUpdateLog(BufWriter<File>);
 
 impl SplitRegistryUpdateLog {
@@ -82,7 +85,7 @@ impl SplitRegistryUpdateLog {
             assert!(update.values.len() <= u32::MAX as usize);
             self.0.write(&(index as u32).to_le_bytes())?;
             self.0.write(&(update.values.len() as u32).to_le_bytes())?;
-            for (pt, idx) in update.values.iter().copied() {
+            for (idx, pt) in update.values.iter().copied() {
                 assert!(idx as usize <= u32::MAX as usize);
                 self.0.write(&pt.to_compressed())?;
                 self.0.write(&(idx as u32).to_le_bytes())?;
@@ -161,12 +164,12 @@ impl SplitRegistryUpdateLog {
                             for _ in 0..count {
                                 infile.read_exact(&mut g1_buf)?;
                                 infile.read_exact(&mut len_buf)?;
-                                let Some(pt) = G1Projective::from_compressed(&g1_buf).into_option()
+                                let Some(pt) = G1Affine::from_compressed(&g1_buf).into_option()
                                 else {
                                     return Err(AccumulatorError::InvalidLog);
                                 };
                                 let idx = u32::from_le_bytes(len_buf);
-                                batch.values.push((pt, idx as IndexType));
+                                batch.values.push((idx as IndexType, pt));
                             }
                             update.apply_batch_removal(&batch)?;
                         } else {
@@ -195,8 +198,11 @@ impl SplitRegistryUpdateLog {
             let Some(signature) = G1Affine::from_compressed(&g1_buf).into_option() else {
                 return Err(AccumulatorError::InvalidLog);
             };
-            // FIXME keep old accum if no batch is applied
-            let accum = batch.accumulator();
+            let accum = if batch.is_empty() {
+                witness.partition.accum
+            } else {
+                batch.accumulator()
+            };
             PartitionSignature {
                 accum,
                 g2accum,
@@ -289,5 +295,10 @@ mod tests {
         let upd_witness2 =
             SplitRegistryUpdateLog::update_membership_witness(&temp_file, &pk2, &witness1).unwrap();
         assert!(pk2.verify_membership_witness(&upd_witness2).is_ok());
+        // update again from the same log
+        let upd_witness3 =
+            SplitRegistryUpdateLog::update_membership_witness(&temp_file, &pk2, &upd_witness2)
+                .unwrap();
+        assert!(pk2.verify_membership_witness(&upd_witness3).is_ok());
     }
 }

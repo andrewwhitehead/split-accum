@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-use bls12_381_plus::G1Projective;
+use bls12_381_plus::G1Affine;
 
 use crate::batch_update::BatchRemoval;
 use crate::{AccumulatorError, EpochType, IndexType};
@@ -53,7 +53,7 @@ impl RegistryUpdateLog {
         let count = update.values.len() as u32;
         self.0.write(&[UPDATE_REMOVE])?;
         self.0.write(&count.to_le_bytes())?;
-        for (pt, idx) in update.values.iter().copied() {
+        for (idx, pt) in update.values.iter().copied() {
             assert!(idx as usize <= u32::MAX as usize);
             self.0.write(&pt.to_compressed())?;
             self.0.write(&(idx as u32).to_le_bytes())?;
@@ -108,12 +108,11 @@ impl RegistryUpdateLog {
                         for _ in 0..count {
                             infile.read_exact(&mut pt_buf)?;
                             infile.read_exact(&mut len_buf)?;
-                            let Some(pt) = G1Projective::from_compressed(&pt_buf).into_option()
-                            else {
+                            let Some(pt) = G1Affine::from_compressed(&pt_buf).into_option() else {
                                 return Err(AccumulatorError::InvalidLog);
                             };
                             let idx = u32::from_le_bytes(len_buf);
-                            batch.values.push((pt, idx as IndexType));
+                            batch.values.push((idx as IndexType, pt));
                         }
                         update.apply_batch_removal(&batch)?;
                     } else {
@@ -206,5 +205,9 @@ mod tests {
         let upd_witness2 =
             RegistryUpdateLog::update_membership_witness(&temp_file, &pk2, &witness1).unwrap();
         assert!(pk2.verify_membership_witness(&upd_witness2).is_ok());
+        // update again from the same log
+        let upd_witness3 =
+            RegistryUpdateLog::update_membership_witness(&temp_file, &pk2, &upd_witness2).unwrap();
+        assert!(pk2.verify_membership_witness(&upd_witness3).is_ok());
     }
 }

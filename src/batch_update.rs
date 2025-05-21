@@ -1,5 +1,5 @@
 use bls12_381_plus::group::Wnaf;
-use bls12_381_plus::{group::Curve, G1Projective, Scalar};
+use bls12_381_plus::{group::Curve, G1Affine, G1Projective, Scalar};
 
 use crate::accum::{Accumulator, AccumulatorPrivateKey, MembershipWitness, RegistryPublic};
 use crate::common::{batch_invert, compute_member_value, AccumulatorError, IndexType};
@@ -24,7 +24,7 @@ impl SignedMembershipWitness {
 #[derive(Debug, Clone)]
 pub struct BatchRemoval {
     /// The set of terms and encoded member values.
-    pub(crate) values: Vec<(G1Projective, IndexType)>,
+    pub(crate) values: Vec<(IndexType, G1Affine)>,
     /// The partition index of the batch operation.
     pub(crate) partition: IndexType,
 }
@@ -61,31 +61,44 @@ impl BatchRemoval {
         assert!(bool::from(batch_invert(&mut denoms)), "Inversion failure");
         // Calculate `g1•v•1/denom` for each member
         let mut wnaf = Wnaf::new();
-        let mut wnaf_base = wnaf.base(accum.0.into(), denoms.len() + 1);
-        let values = members
-            .iter()
-            .copied()
-            .zip(&denoms)
-            .map(|((index, _), denom)| (wnaf_base.scalar(denom), index))
-            .collect();
+        let mut wnaf_base = wnaf.base(accum.0.into(), members.len() + 1);
+        let mut proj = Vec::with_capacity(members.len() + 1);
         // The new partition state is the previous value times the sum of the denominators
         // which is equal to `v•1/sum_i(a + m_i)`
         let state_mul = denoms.iter().sum::<Scalar>();
-        Ok((
-            BatchRemoval { values, partition },
-            Accumulator(wnaf_base.scalar(&state_mul).to_affine()),
-            state_mul,
-        ))
+        for denom in denoms {
+            proj.push(wnaf_base.scalar(&denom));
+        }
+        proj.push(wnaf_base.scalar(&state_mul));
+        let mut aff = vec![G1Affine::identity(); members.len() + 1];
+        G1Projective::batch_normalize(&proj, &mut aff);
+        let accum = Accumulator(aff.pop().unwrap());
+        let values = members
+            .iter()
+            .copied()
+            .zip(aff)
+            .map(|((index, _), aff)| (index, aff))
+            .collect();
+        Ok((BatchRemoval { values, partition }, accum, state_mul))
     }
 
     pub(crate) fn accumulator(&self) -> Accumulator {
-        Accumulator(
-            self.values
-                .iter()
-                .map(|v| v.0)
-                .sum::<G1Projective>()
-                .to_affine(),
-        )
+        match self.values.len() {
+            0 => Accumulator(G1Affine::identity()), // invalid state
+            1 => Accumulator(self.values[0].1),
+            _ => Accumulator(
+                self.values[1..]
+                    .iter()
+                    .fold(G1Projective::from(self.values[0].1), |s, p| {
+                        s.add_mixed(&p.1)
+                    })
+                    .to_affine(),
+            ),
+        }
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.values.is_empty()
     }
 }
 
@@ -117,7 +130,7 @@ impl UpdateMembershipWitness {
             .values
             .iter()
             .copied()
-            .any(|(_, member)| member == self.index)
+            .any(|(member, _)| member == self.index)
         {
             Err(AccumulatorError::MemberRemoved)
         } else {
@@ -125,8 +138,8 @@ impl UpdateMembershipWitness {
             points.push(self.witness);
             let mut denoms = Vec::with_capacity(batch.values.len() + 1);
             denoms.push(Scalar::ONE);
-            for (pt, member) in batch.values.iter().copied() {
-                points.push(pt);
+            for (member, pt) in batch.values.iter().copied() {
+                points.push(G1Projective::from(pt));
                 let term = Scalar::from(member) - self.value;
                 denoms[0] *= term;
                 denoms.push(-term);
