@@ -101,25 +101,6 @@ impl AccumulatorPublicKey {
     }
 }
 
-/// An accumulator private key.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AccumulatorPrivate {
-    pub origin: Accumulator,
-    pub scalar: Scalar,
-    pub active: Accumulator,
-}
-
-impl AccumulatorPrivate {
-    pub fn new(rng: &mut impl RngCore) -> Self {
-        let origin = Accumulator(G1Projective::random(rng).to_affine());
-        Self {
-            origin,
-            scalar: Scalar::ONE,
-            active: origin,
-        }
-    }
-}
-
 /// A membership witness against a public accumulator state.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MembershipWitness {
@@ -136,7 +117,7 @@ pub struct MembershipWitness {
 pub struct RegistryPrivate {
     pub(crate) capacity: IndexType,
     pub(crate) accum_key: AccumulatorPrivateKey,
-    pub(crate) accum: AccumulatorPrivate,
+    pub(crate) accum: Accumulator,
     pub(crate) epoch: EpochType,
 }
 
@@ -144,10 +125,11 @@ impl RegistryPrivate {
     /// Create a new registry.
     pub fn new(capacity: IndexType, epoch: EpochType, rng: &mut impl RngCore) -> Self {
         let accum_key = AccumulatorPrivateKey::new(capacity, rng);
+        let accum = Accumulator(G1Projective::random(rng).to_affine());
         RegistryPrivate {
             capacity,
             accum_key,
-            accum: AccumulatorPrivate::new(rng),
+            accum,
             epoch,
         }
     }
@@ -162,7 +144,7 @@ impl RegistryPrivate {
         } else {
             Ok(self
                 .accum_key
-                .create_membership_witness(&self.accum.active, index, self.epoch))
+                .create_membership_witness(&self.accum, index, self.epoch))
         }
     }
 
@@ -181,7 +163,7 @@ impl RegistryPrivate {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let (update, new_accum) =
+        let (update, new_accum, _) =
             BatchRemoval::remove_members(&self.accum, &self.accum_key, &members, 0)?;
         self.accum = new_accum;
         Ok(update)
@@ -206,7 +188,7 @@ impl RegistryPrivate {
     pub fn to_public(&self) -> RegistryPublic {
         RegistryPublic {
             accum_key: self.accum_key.public.clone(),
-            accum: self.accum.active,
+            accum: self.accum,
             epoch: self.epoch,
         }
     }

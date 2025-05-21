@@ -1,9 +1,7 @@
 use bls12_381_plus::group::Wnaf;
 use bls12_381_plus::{group::Curve, G1Projective, Scalar};
 
-use crate::accum::{
-    Accumulator, AccumulatorPrivate, AccumulatorPrivateKey, MembershipWitness, RegistryPublic,
-};
+use crate::accum::{Accumulator, AccumulatorPrivateKey, MembershipWitness, RegistryPublic};
 use crate::common::{batch_invert, compute_member_value, AccumulatorError, IndexType};
 use crate::split_accum::{PartitionSignature, SignedMembershipWitness, SplitRegistryPublic};
 use crate::EpochType;
@@ -39,11 +37,11 @@ impl BatchRemoval {
 
     /// Remove multiple values from an accumulator, producing a batch removal operation.
     pub(crate) fn remove_members(
-        accum: &AccumulatorPrivate,
+        accum: &Accumulator,
         sk: &AccumulatorPrivateKey,
         members: &[(IndexType, Scalar)],
         partition: IndexType,
-    ) -> Result<(BatchRemoval, AccumulatorPrivate), AccumulatorError> {
+    ) -> Result<(BatchRemoval, Accumulator, Scalar), AccumulatorError> {
         let mut denoms = Vec::with_capacity(members.len());
         for (_, member) in members.iter().copied() {
             // each denominator starts as `(a + m_i)`
@@ -63,7 +61,7 @@ impl BatchRemoval {
         assert!(bool::from(batch_invert(&mut denoms)), "Inversion failure");
         // Calculate `g1•v•1/denom` for each member
         let mut wnaf = Wnaf::new();
-        let mut wnaf_base = wnaf.base(accum.active.0.into(), denoms.len() + 1);
+        let mut wnaf_base = wnaf.base(accum.0.into(), denoms.len() + 1);
         let values = members
             .iter()
             .copied()
@@ -72,14 +70,11 @@ impl BatchRemoval {
             .collect();
         // The new partition state is the previous value times the sum of the denominators
         // which is equal to `v•1/sum_i(a + m_i)`
-        let term_mul = denoms.iter().sum::<Scalar>();
+        let state_mul = denoms.iter().sum::<Scalar>();
         Ok((
             BatchRemoval { values, partition },
-            AccumulatorPrivate {
-                origin: accum.origin,
-                scalar: accum.scalar * term_mul,
-                active: Accumulator(wnaf_base.scalar(&term_mul).to_affine()),
-            },
+            Accumulator(wnaf_base.scalar(&state_mul).to_affine()),
+            state_mul,
         ))
     }
 
@@ -215,7 +210,7 @@ mod tests {
         let update = accum1.remove_members([1]).expect("Error removing members");
         accum1.set_epoch(epoch1);
         // check new accumulator is equal to the membership witness for a single removed value
-        assert_eq!(accum1.accum.active.0, witness1.witness);
+        assert_eq!(accum1.accum.0, witness1.witness);
         // cannot apply batch update for removed member
         assert!(witness1
             .begin_update()

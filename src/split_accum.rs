@@ -9,7 +9,7 @@ use rand::RngCore;
 
 use crate::batch_update::BatchRemoval;
 use crate::{
-    accum::{Accumulator, AccumulatorPrivate, AccumulatorPublicKey},
+    accum::{Accumulator, AccumulatorPublicKey},
     common::hash_to_scalar,
 };
 use crate::{
@@ -147,8 +147,10 @@ pub struct PartitionSignature {
 /// The private information for a split accumulator instance.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PartitionPrivate {
-    /// The current state of the partition, respective of previous removals.
-    pub(crate) accum: AccumulatorPrivate,
+    /// The current state of the partition as a scalar, relative to the base point.
+    pub(crate) state: Scalar,
+    /// The current state of the partition as an accumulator.
+    pub(crate) accum: Accumulator,
     /// The partition index.
     pub(crate) index: IndexType,
     /// The latest partition signature, against which witnesses are created.
@@ -219,10 +221,10 @@ impl SplitRegistryPrivate {
         let mut ret = Vec::with_capacity(len);
         let mut wnaf = Wnaf::new();
         let mut wnaf_base = wnaf.base(G1Projective::from(self.partition_key.base_point), len);
-        let part_mul = Scalar::ONE;
+        let mut part_mul = Scalar::ONE;
         for idx in 0..len {
-            let scalar = part_mul * self.partition_key.init_key;
-            let active = Accumulator(wnaf_base.scalar(&scalar).to_affine());
+            part_mul *= self.partition_key.init_key;
+            let accum = Accumulator(wnaf_base.scalar(&part_mul).to_affine());
             ret.push(PartitionPrivate {
                 // temporary signature, replaced later
                 signature: PartitionSignature {
@@ -232,11 +234,8 @@ impl SplitRegistryPrivate {
                     index: idx as IndexType,
                     epoch: self.epoch,
                 },
-                accum: AccumulatorPrivate {
-                    origin: active.clone(),
-                    scalar,
-                    active,
-                },
+                state: part_mul,
+                accum,
                 index: idx as IndexType,
             });
         }
@@ -263,28 +262,28 @@ impl SplitRegistryPrivate {
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let (update, new_accum) = BatchRemoval::remove_members(
+        let (update, new_accum, state_mul) = BatchRemoval::remove_members(
             &partition.accum,
             &self.accum_key,
             &members,
             partition.index,
         )?;
         partition.accum = new_accum;
+        partition.state *= state_mul;
         Ok(update)
     }
 
     /// Sign a partition, producing a signature over the public state for a specific epoch.
     pub fn sign_partition(&self, partition: &mut PartitionPrivate) {
-        let accum = &partition.accum;
         let sig_mul = (self.partition_key.signing_key
             + self.partition_key.epoch_key * Scalar::from(self.epoch)
-            + accum.scalar)
+            + partition.state)
             .invert()
             .expect("Inversion error");
         let signature = (G1Affine::generator() * sig_mul).to_affine();
         partition.signature = PartitionSignature {
-            accum: accum.active,
-            g2accum: (G2Affine::generator() * accum.scalar).to_affine(),
+            accum: partition.accum,
+            g2accum: (G2Affine::generator() * partition.state).to_affine(),
             signature,
             index: partition.index,
             epoch: self.epoch,
@@ -303,11 +302,11 @@ impl SplitRegistryPrivate {
         let mut g2commits = vec![G2Affine::generator(); pcount];
         let mut sigs = vec![G1Affine::generator(); pcount];
 
-        for part in &*partitions {
+        for partition in &*partitions {
             denoms.push(
                 self.partition_key.signing_key
                     + self.partition_key.epoch_key * Scalar::from(self.epoch)
-                    + part.accum.scalar,
+                    + partition.state,
             );
         }
         // Invert denominators. May fail with negligible probability
@@ -316,22 +315,25 @@ impl SplitRegistryPrivate {
         let mut wnaf_g1base = wnaf_g1.base(G1Projective::GENERATOR, pcount);
         let mut wnaf_g2 = Wnaf::new();
         let mut wnaf_g2base = wnaf_g2.base(G2Projective::GENERATOR, pcount);
-        partitions.iter().zip(denoms).for_each(|(part, denom)| {
-            g2proj.push(wnaf_g2base.scalar(&part.accum.scalar));
-            sigsproj.push(wnaf_g1base.scalar(&denom));
-        });
+        partitions
+            .iter()
+            .zip(denoms)
+            .for_each(|(partition, denom)| {
+                g2proj.push(wnaf_g2base.scalar(&partition.state));
+                sigsproj.push(wnaf_g1base.scalar(&denom));
+            });
         G2Projective::batch_normalize(&g2proj, &mut g2commits);
         G1Projective::batch_normalize(&sigsproj, &mut sigs);
 
         partitions
             .iter_mut()
             .zip(g2commits.into_iter().zip(sigs))
-            .for_each(|(part, (g2commit, signature))| {
-                part.signature = PartitionSignature {
-                    accum: part.accum.active,
+            .for_each(|(partition, (g2commit, signature))| {
+                partition.signature = PartitionSignature {
+                    accum: partition.accum,
                     g2accum: g2commit,
                     signature,
-                    index: part.index,
+                    index: partition.index,
                     epoch: self.epoch,
                 }
             });
